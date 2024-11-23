@@ -1,102 +1,84 @@
-# build_spec.py
-import sys
+#!/usr/bin/env python
 import os
 import platform
+import subprocess
 
-from PyInstaller.building.api import PYZ, EXE
-from PyInstaller.building.build_main import Analysis
-from PyInstaller.building.osx import BUNDLE
 
-block_cipher = None
+def build():
+    main_script = os.path.abspath('main.py')
 
-# Specify OS-specific excludes to reduce size
-excludes = [
-    'tkinter', 'unittest', 'email', 'html', 'http', 'xml',
-    'pydoc', 'doctest', 'argparse', 'datetime', 'zipfile',
-    'urllib', 'threading', 'logging', 'distutils'
-]
+    # PyInstaller options
+    options = [
+        '--name=ImageCompressor',
+        '--onefile',
+        '--windowed',
+        '--noconfirm',
+        main_script,
+    ]
 
-# Hidden imports needed for the app
-hidden_imports = [
-    'numpy',
-    'PIL',
-    'PIL._imagingtk',
-    'PIL._tkinter_finder',
-    'PyQt5',
-    'matplotlib'
-]
+    # Platform-specific options
+    system = platform.system()
+    if system == 'Darwin':
+        options += [
+            # '--icon=path/to/icon.icns',
+            '--codesign-identity=-',
+            '--osx-bundle-identifier=com.icikiwir.imagecompressor',
+        ]
+    elif system == 'Windows':
+        # options += [
+        #     '--icon=path/to/icon.ico',
+        # ]
+        # Ensure UPX is available
+        if not os.path.exists('upx.exe'):
+            download_upx()
+        options.append(f'--upx-dir={os.path.abspath(".")}')
+    else:
+        # Linux-specific options
+        pass
 
-# Project root directory (where main.py is located)
-project_root = os.path.dirname(os.path.dirname(__file__))
+    # Hidden imports
+    hidden_imports = [
+        'numpy',
+        'PIL',
+        'PyQt5',
+        'matplotlib',
+    ]
+    for hidden_import in hidden_imports:
+        options.append(f'--hidden-import={hidden_import}')
 
-a = Analysis(
-    [os.path.join(project_root, 'main.py')],
-    pathex=[project_root],
-    binaries=[],
-    datas=[],
-    hiddenimports=hidden_imports,
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=excludes,
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False
-)
+    # Run PyInstaller
+    cmd = ['pyinstaller'] + options
+    subprocess.run(cmd)
 
-# Remove unnecessary binaries/data
-def remove_from_list(source_list, patterns):
-    for file_name in list(source_list):
-        for pattern in patterns:
-            if pattern in str(file_name):
-                source_list.remove(file_name)
-                break
 
-# Remove unnecessary Qt plugins and files to reduce size
-remove_from_list(a.binaries, [
-    'Qt5DBus',
-    'Qt5Network',
-    'Qt5Qml',
-    'Qt5Quick',
-    'Qt5Svg',
-    'Qt5Designer',
-    'libGL',
-])
+def download_upx():
+    """Download and set up UPX"""
+    import urllib.request
+    import zipfile
+    import shutil
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+    UPX_VERSION = "4.2.1"
+    UPX_URL = f"https://github.com/upx/upx/releases/download/v{UPX_VERSION}/upx-{UPX_VERSION}-win64.zip"
+    print("Downloading UPX...")
 
-# Define executable
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='ImageCompressor',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=True,  # Strip binaries
-    upx=True,  # Enable UPX compression
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    icon=None  # Add icon path if you have one
-)
+    # Download UPX
+    zip_path = "upx.zip"
+    urllib.request.urlretrieve(UPX_URL, zip_path)
+    print("Extracting UPX...")
 
-# Add macOS bundle for .app
-if platform.system() == 'Darwin':
-    app = BUNDLE(
-        exe,
-        name='ImageCompressor.app',
-        icon=None,  # Add .icns file path for macOS
-        bundle_identifier=None,
-        info_plist={
-            'NSHighResolutionCapable': 'True',
-            'LSBackgroundOnly': 'False',
-            'CFBundleName': 'ImageCompressor',
-            'CFBundleDisplayName': 'PCA Image Compressor',
-            'CFBundleShortVersionString': '1.0.0',
-        },
-    )
+    # Extract UPX
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall("upx_temp")
+
+    # Move UPX executable
+    upx_exe = f"upx_temp/upx-{UPX_VERSION}-win64/upx.exe"
+    shutil.move(upx_exe, "upx.exe")
+
+    # Clean up
+    os.remove(zip_path)
+    shutil.rmtree("upx_temp")
+    print("UPX setup completed")
+
+
+if __name__ == '__main__':
+    build()

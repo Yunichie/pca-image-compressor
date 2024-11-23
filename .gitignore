@@ -1,4 +1,5 @@
 /.idea
-upx.exe
+/build/ImageCompressor
 /dist
-/build/build_spec
+upx.exe
+ImageCompressor.spec
