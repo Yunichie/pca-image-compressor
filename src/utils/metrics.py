@@ -1,42 +1,55 @@
 import numpy as np
 from typing import Dict
+from skimage.metrics import structural_similarity as ssim
 
-def calculate_compression_quality(original: np.ndarray, reconstructed: np.ndarray) -> Dict[str, float]:
+def compute_ssim(img1: np.ndarray, img2: np.ndarray) -> float:
     """
-    Calculate compression quality metrics.
+    Compute the Structural Similarity Index (SSIM) between two images.
+
+    Args:
+        img1: Original image array.
+        img2: Reconstructed image array.
+
+    Returns:
+        SSIM value.
+    """
+    if img1.ndim == 2:
+        # Grayscale images
+        return ssim(img1, img2, data_range=img2.max() - img2.min())
+    else:
+        # Color images: compute SSIM for each channel and average
+        ssim_total = 0
+        for i in range(img1.shape[2]):
+            ssim_channel = ssim(img1[:, :, i], img2[:, :, i], data_range=img2[:, :, i].max() - img2[:, :, i].min())
+            ssim_total += ssim_channel
+        return ssim_total / img1.shape[2]
+
+def calculate_compression_quality(original: np.ndarray, reconstructed: np.ndarray) -> Dict[str, Dict[str, float]]:
+    """
+    Calculate compression quality metrics for each color channel.
 
     Args:
         original: Original image array
         reconstructed: Reconstructed image array
 
     Returns:
-        Dictionary containing MSE, PSNR, and SSIM metrics
+        Dictionary containing MSE, PSNR, and SSIM metrics per channel
     """
-    # Calculate MSE
-    mse = np.mean((original - reconstructed) ** 2)
+    metrics = {}
+    channels = ['Red', 'Green', 'Blue'] if original.ndim == 3 else ['Grayscale']
 
-    # Calculate PSNR
-    psnr = 20 * np.log10(255 / np.sqrt(mse)) if mse > 0 else float('inf')
+    for idx, channel in enumerate(channels):
+        orig = original[:, :, idx] if original.ndim == 3 else original
+        recon = reconstructed[:, :, idx] if reconstructed.ndim == 3 else reconstructed
 
-    # Calculate SSIM (simplified version)
-    def compute_ssim(img1: np.ndarray, img2: np.ndarray) -> float:
-        c1 = (0.01 * 255) ** 2
-        c2 = (0.03 * 255) ** 2
+        mse = np.mean((orig - recon) ** 2)
+        psnr = 20 * np.log10(255 / np.sqrt(mse)) if mse > 0 else float('inf')
+        channel_ssim = compute_ssim(orig, recon)
 
-        mean1 = np.mean(img1)
-        mean2 = np.mean(img2)
-        std1 = np.std(img1)
-        std2 = np.std(img2)
-        cov = np.mean((img1 - mean1) * (img2 - mean2))
+        metrics[channel] = {
+            'MSE': mse,
+            'PSNR': psnr,
+            'SSIM': channel_ssim
+        }
 
-        ssim = ((2 * mean1 * mean2 + c1) * (2 * cov + c2)) / \
-               ((mean1 ** 2 + mean2 ** 2 + c1) * (std1 ** 2 + std2 ** 2 + c2))
-        return ssim
-
-    ssim = compute_ssim(original, reconstructed)
-
-    return {
-        'MSE': mse,
-        'PSNR': psnr,
-        'SSIM': ssim
-    }
+    return metrics

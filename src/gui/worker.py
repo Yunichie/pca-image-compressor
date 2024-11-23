@@ -12,11 +12,12 @@ class CompressionWorker(QThread):
     progress = pyqtSignal(int)
     error = pyqtSignal(str)
 
-    def __init__(self, image_path, n_components, patch_size):
+    def __init__(self, image_path, n_components, patch_size, to_grayscale):
         super().__init__()
         self.image_path = image_path
         self.n_components = n_components
         self.patch_size = patch_size
+        self.to_grayscale = to_grayscale
         self.compressor = PCAImageCompressor()
 
     def run(self):
@@ -24,7 +25,7 @@ class CompressionWorker(QThread):
             # Compression
             self.progress.emit(25)
             compressed_data, compression_ratio = self.compressor.compress(
-                self.image_path, self.n_components, self.patch_size
+                self.image_path, self.n_components, self.patch_size, self.to_grayscale
             )
 
             # Get compression statistics
@@ -34,8 +35,11 @@ class CompressionWorker(QThread):
             self.progress.emit(75)
             reconstructed = self.compressor.decompress(compressed_data)
 
-            # Original image for comparison
-            original = np.array(Image.open(self.image_path).convert('L'))
+            # Load original image with the same mode as reconstructed
+            if self.to_grayscale:
+                original = np.array(Image.open(self.image_path).convert('L'))
+            else:
+                original = np.array(Image.open(self.image_path).convert('RGB'))
 
             # Calculate quality metrics
             quality_metrics = calculate_compression_quality(original, reconstructed)

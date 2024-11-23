@@ -1,6 +1,7 @@
 import numpy as np
 from PIL import Image
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, Any
+
 
 class PCAImageCompressor:
     """
@@ -31,8 +32,14 @@ class PCAImageCompressor:
         """
         if not isinstance(image_data, np.ndarray):
             raise ValueError("Image data must be a numpy array")
-        if len(image_data.shape) != 2:
-            raise ValueError("Image must be grayscale (2D array)")
+        if image_data.ndim == 2:
+            # Grayscale image
+            pass
+        elif image_data.ndim == 3 and image_data.shape[2] in [3, 4]:
+            # Color image (RGB or RGBA)
+            pass
+        else:
+            raise ValueError("Image must be a 2D grayscale or 3D color image")
 
     def _standardize(self, image_data: np.ndarray) -> np.ndarray:
         """
@@ -77,20 +84,20 @@ class PCAImageCompressor:
                 patches.append(patch)
         return np.array(patches)
 
-    def _reconstruct_image_from_patches(self, patches: np.ndarray, image_shape: Tuple[int, int]) -> np.ndarray:
+    def _reconstruct_image_from_patches(self, patches: np.ndarray, image_shape: Tuple[int, ...]) -> np.ndarray:
         """
         Reconstruct the image from patches.
 
         Args:
             patches: Array of image patches
-            image_shape: Original image shape
+            image_shape: Original image shape (h,w) or (h,w,c)
 
         Returns:
             Reconstructed image array
         """
-        h, w = image_shape
+        h, w = image_shape[:2]
         patch_size = self.patch_size
-        reconstructed_image = np.zeros((h, w))
+        reconstructed_image = np.zeros((h, w))  # Always 2D since we handle channels separately
         patch_counts = np.zeros((h, w))
 
         idx = 0
@@ -100,11 +107,13 @@ class PCAImageCompressor:
                 patch_counts[i:i + patch_size, j:j + patch_size] += 1
                 idx += 1
 
-        # Average overlapping regions
-        reconstructed_image /= patch_counts
+        # Avoid division by zero
+        mask = patch_counts > 0
+        reconstructed_image[mask] /= patch_counts[mask]
+
         return reconstructed_image
 
-    def compress(self, image_path: str, n_components: int, patch_size: int) -> Tuple[np.ndarray, float]:
+    def compress(self, image_path: str, n_components: int, patch_size: int, to_grayscale: bool = False) -> Tuple[Any, float]:
         """
         Compress the image using PCA.
 
@@ -122,56 +131,92 @@ class PCAImageCompressor:
         """
         # Load and convert image to grayscale
         try:
-            image = Image.open(image_path).convert('L')
+            image = Image.open(image_path)
+            if to_grayscale:
+                image = image.convert('L')
+            else:
+                image = image.convert('RGB')  # Ensure image is in RGB format
         except Exception as e:
             raise ValueError(f"Failed to load image: {str(e)}")
 
         image_data = np.array(image).astype(np.float64)
         self._validate_image(image_data)
 
-        # Store the original shape and patch size
         self.original_shape = image_data.shape
         self.n_components = n_components
         self.patch_size = patch_size
 
-        # Extract patches using the specified patch size
-        patches = self._extract_patches(image_data)
+        if image_data.ndim == 2:
+            # Grayscale image processing
+            patches = self._extract_patches(image_data)
+            X = patches.reshape(patches.shape[0], -1)
+            X_centered = self._standardize(X)
+            n_samples = X_centered.shape[0]
+            covariance_matrix = (X_centered.T @ X_centered) / n_samples
 
-        # Flatten patches to create the data matrix X
-        X = patches.reshape(patches.shape[0], -1)
+            eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+            idx = eigenvalues.argsort()[::-1]
+            eigenvalues = eigenvalues[idx]
+            eigenvectors = eigenvectors[:, idx]
 
-        # Standardize the data
-        X_centered = self._standardize(X)
+            self.eigenvalues = eigenvalues
+            self.eigenvectors = eigenvectors[:, :n_components]
+            self.mean = self.mean  # Already set in _standardize()
 
-        # Calculate covariance matrix with normalization by 1/n
-        n_samples = X_centered.shape[0]
-        covariance_matrix = (X_centered.T @ X_centered) / n_samples
+            compressed_data = X_centered @ self.eigenvectors
 
-        # Calculate eigenvectors and eigenvalues
-        eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+            # Calculate compression ratio
+            original_size = X.size
+            compressed_size = compressed_data.size + self.eigenvectors.size
+            compression_ratio = original_size / compressed_size
 
-        # Sort eigenvalues and eigenvectors in descending order
-        idx = eigenvalues.argsort()[::-1]
-        self.eigenvalues = eigenvalues[idx]
-        eigenvectors = eigenvectors[:, idx]
+            return compressed_data, compression_ratio
+        else:
+            # Color image processing
+            # Initialize lists instead of trying to append to numpy arrays
+            eigenvalues_list = []
+            eigenvectors_list = []
+            mean_list = []
+            compressed_data = []
 
-        # Store top n_components eigenvectors
-        self.eigenvectors = eigenvectors[:, :n_components]
+            for c in range(image_data.shape[2]):
+                channel_data = image_data[:, :, c]
+                patches = self._extract_patches(channel_data)
+                X = patches.reshape(patches.shape[0], -1)
+                X_centered = self._standardize(X)
+                n_samples = X_centered.shape[0]
+                covariance_matrix = (X_centered.T @ X_centered) / n_samples
 
-        # Project data onto eigenvectors
-        compressed_data = X_centered @ self.eigenvectors
+                eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+                idx = eigenvalues.argsort()[::-1]
+                eigenvalues = eigenvalues[idx]
+                eigenvectors = eigenvectors[:, idx]
 
-        # Calculate compression ratio
-        original_size = X.size
-        compressed_size = compressed_data.size + self.eigenvectors.size
-        compression_ratio = original_size / compressed_size
+                # Store in lists instead of appending to numpy arrays
+                eigenvalues_list.append(eigenvalues)
+                eigenvectors_list.append(eigenvectors[:, :n_components])
+                mean_list.append(self.mean)
 
-        return compressed_data, compression_ratio
+                compressed_c = X_centered @ eigenvectors[:, :n_components]
+                compressed_data.append(compressed_c)
+
+            # Store the lists in class attributes
+            self.eigenvalues = eigenvalues_list
+            self.eigenvectors = eigenvectors_list
+            self.mean = mean_list
+
+            original_size = image_data.size
+            compressed_size = sum(cd.size for cd in compressed_data) + sum(ev.size for ev in eigenvectors_list)
+            compression_ratio = original_size / compressed_size
+
+            return compressed_data, compression_ratio
 
         # except np.linalg.LinAlgError as e:
         #     raise ValueError(f"Linear algebra computation failed: {str(e)}")
 
-    def decompress(self, compressed_data: np.ndarray) -> np.ndarray:
+    # src/core/pca_compressor.py
+
+    def decompress(self, compressed_data: Any) -> np.ndarray:
         """
         Decompress the image data.
 
@@ -184,28 +229,36 @@ class PCAImageCompressor:
         Raises:
             ValueError: If compression hasn't been performed or data is invalid
         """
-        if any(attr is None for attr in [self.eigenvectors, self.mean, self.original_shape]):
+        if self.eigenvectors is None or self.mean is None or self.original_shape is None:
             raise ValueError("Must compress an image before decompressing")
 
-        try:
-            # Reconstruct the data
+        if len(self.original_shape) == 2:
+            # Grayscale image reconstruction
             X_reconstructed = compressed_data @ self.eigenvectors.T
             X_reconstructed += self.mean
-
-            # Reshape reconstructed data back into patches
-            patch_size = self.patch_size
-            patches = X_reconstructed.reshape(-1, patch_size, patch_size)
-
-            # Reconstruct image from patches
+            patches = X_reconstructed.reshape(-1, self.patch_size, self.patch_size)
             reconstructed_image = self._reconstruct_image_from_patches(patches, self.original_shape)
+        else:
+            # Color image reconstruction
+            reconstructed_channels = []
+            for i in range(len(compressed_data)):
+                X_reconstructed = compressed_data[i] @ self.eigenvectors[i].T
+                X_reconstructed += self.mean[i]
+                patches = X_reconstructed.reshape(-1, self.patch_size, self.patch_size)
+                # Reconstruct each channel independently using same shape
+                reconstructed_channel = self._reconstruct_image_from_patches(
+                    patches, self.original_shape[:2]
+                )
+                reconstructed_channels.append(reconstructed_channel)
 
-            # Clip values to valid pixel range
-            reconstructed_image = np.clip(reconstructed_image, 0, 255)
+            # Stack channels after reconstruction
+            reconstructed_image = np.stack(reconstructed_channels, axis=2)
 
-            return reconstructed_image.astype(np.uint8)
+        reconstructed_image = np.clip(reconstructed_image, 0, 255)
+        return reconstructed_image.astype(np.uint8)
 
-        except Exception as e:
-            raise ValueError(f"Failed to decompress image: {str(e)}")
+        # except Exception as e:
+        #     raise ValueError(f"Failed to decompress image: {str(e)}")
 
     def get_compression_stats(self) -> Dict[str, float]:
         """

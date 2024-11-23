@@ -9,7 +9,7 @@ def build():
 
     # PyInstaller options
     options = [
-        '--name=ImageCompressor',
+        '--name=AdvancedPCAImageCompressor',
         '--onefile',
         '--windowed',
         '--noconfirm',
@@ -22,7 +22,7 @@ def build():
         options += [
             # '--icon=path/to/icon.icns',
             '--codesign-identity=-',
-            '--osx-bundle-identifier=com.icikiwir.imagecompressor',
+            '--osx-bundle-identifier=com.icikiwir.advancedpcaimagecompressor',
         ]
     elif system == 'Windows':
         # options += [
@@ -42,6 +42,7 @@ def build():
         'PIL',
         'PyQt5',
         'matplotlib',
+        'scikit-image'
     ]
     for hidden_import in hidden_imports:
         options.append(f'--hidden-import={hidden_import}')

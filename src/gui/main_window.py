@@ -6,7 +6,7 @@ from PIL import Image
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QFileDialog,
                              QSpinBox, QProgressBar, QMessageBox,
-                             QTabWidget, QGridLayout)
+                             QTabWidget, QGridLayout, QCheckBox)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QPixmap, QImage
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
@@ -59,6 +59,11 @@ class ImageCompressorGUI(QMainWindow):
         patch_size_layout.addWidget(patch_size_label)
         patch_size_layout.addWidget(self.patch_size_spin)
         controls_layout.addLayout(patch_size_layout)
+
+        # Add grayscale checkbox
+        self.grayscale_checkbox = QCheckBox("Convert to Grayscale")
+        self.grayscale_checkbox.setChecked(True)
+        controls_layout.addWidget(self.grayscale_checkbox)
 
         # Add compress button
         self.compress_btn = QPushButton("Compress")
@@ -182,6 +187,7 @@ class ImageCompressorGUI(QMainWindow):
 
         n_components = self.components_spin.value()
         patch_size = self.patch_size_spin.value()
+        to_grayscale = self.grayscale_checkbox.isChecked()
 
         # Disable controls during compression
         self.compress_btn.setEnabled(False)
@@ -194,7 +200,7 @@ class ImageCompressorGUI(QMainWindow):
 
         # Start compression in worker thread
         self.compression_worker = CompressionWorker(
-            self.image_path, n_components, patch_size
+            self.image_path, n_components, patch_size, to_grayscale
         )
         self.compression_worker.finished.connect(self.compression_finished)
         self.compression_worker.progress.connect(self.progress_bar.setValue)
@@ -205,12 +211,19 @@ class ImageCompressorGUI(QMainWindow):
         (reconstructed, compression_ratio, quality_metrics,
          original_size, compressed_size, compression_stats, eigenvalues) = result
 
-        # Store reconstructed image for saving
         self.reconstructed = reconstructed
 
-        # Display reconstructed image
-        h, w = reconstructed.shape
-        q_img = QImage(reconstructed.data, w, h, w, QImage.Format_Grayscale8)
+        # Handle both grayscale and color images
+        if reconstructed.ndim == 2:
+            # Grayscale image
+            h, w = reconstructed.shape
+            q_img = QImage(reconstructed.data, w, h, w, QImage.Format_Grayscale8)
+        else:
+            # Color image
+            h, w, ch = reconstructed.shape
+            bytes_per_line = ch * w
+            q_img = QImage(reconstructed.data.tobytes(), w, h, bytes_per_line, QImage.Format_RGB888)
+
         pixmap = QPixmap.fromImage(q_img)
         scaled_pixmap = pixmap.scaled(
             500, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation
@@ -221,12 +234,15 @@ class ImageCompressorGUI(QMainWindow):
         self.compressed_size_label.setText(f"Size: {self.format_size(compressed_size)}")
 
         # Update quality metrics display
-        metrics_text = (
-            f"Mean Squared Error: {quality_metrics['MSE']:.2f}\n"
-            f"Peak Signal-to-Noise Ratio: {quality_metrics['PSNR']:.2f} dB\n"
-            f"Structural Similarity Index: {quality_metrics['SSIM']:.3f}\n"
-            f"Size Reduction: {((original_size - compressed_size) / original_size * 100):.1f}%"
-        )
+        metrics_text = ""
+        for channel, metrics in quality_metrics.items():
+            metrics_text += (
+                f"{channel} Channel:\n"
+                f"  Mean Squared Error: {metrics['MSE']:.2f}\n"
+                f"  Peak Signal-to-Noise Ratio: {metrics['PSNR']:.2f} dB\n"
+                f"  Structural Similarity Index: {metrics['SSIM']:.3f}\n\n"
+            )
+        metrics_text += f"Size Reduction: {((original_size - compressed_size) / original_size * 100):.1f}%"
         self.metrics_label.setText(metrics_text)
 
         # Update compression statistics display
@@ -257,23 +273,45 @@ class ImageCompressorGUI(QMainWindow):
         ax1 = self.figure.add_subplot(gs[0, 0])
         ax2 = self.figure.add_subplot(gs[0, 1])
 
-        # Plot eigenvalue spectrum
-        n_values = min(50, len(eigenvalues))
-        values_to_plot = eigenvalues[:n_values]
-        ax1.plot(range(1, len(values_to_plot) + 1), values_to_plot, 'b-')
+        # Check if we're dealing with grayscale or color image
+        is_color = isinstance(eigenvalues, list)
+        channels = ['Red', 'Green', 'Blue'] if is_color else ['Grayscale']
+        colors = ['r', 'g', 'b']
+
+        if is_color:
+            # Color image - eigenvalues is a list of arrays
+            for idx, channel in enumerate(channels):
+                ev = eigenvalues[idx]
+                ev_to_plot = ev[:50]
+                ax1.plot(range(1, len(ev_to_plot) + 1), ev_to_plot,
+                         color=colors[idx], label=f"{channel} Channel")
+
+                cumulative_variance = np.cumsum(explained_variance_ratios[idx][:50])
+                ax2.plot(range(1, len(cumulative_variance) + 1), cumulative_variance,
+                         color=colors[idx], label=f"{channel} Channel")
+        else:
+            # Grayscale image - eigenvalues is a single array
+            ev_to_plot = eigenvalues[:50]
+            ax1.plot(range(1, len(ev_to_plot) + 1), ev_to_plot,
+                     color='k', label="Grayscale")
+
+            cumulative_variance = np.cumsum(explained_variance_ratios[:50])
+            ax2.plot(range(1, len(cumulative_variance) + 1), cumulative_variance,
+                     color='k', label="Grayscale")
+
+        # Configure plots
         ax1.set_xlabel('Principal Component')
         ax1.set_ylabel('Eigenvalue')
         ax1.set_title('Eigenvalue Spectrum\n(Top 50 Components)')
         ax1.grid(True)
+        ax1.legend()
 
-        # Plot cumulative explained variance
-        cumulative_variance = np.cumsum(explained_variance_ratios[:n_values])
-        ax2.plot(range(1, len(cumulative_variance) + 1), cumulative_variance, 'g-')
         ax2.set_xlabel('Number of Components')
         ax2.set_ylabel('Cumulative Explained Variance')
         ax2.set_title('Cumulative Explained Variance Ratio')
         ax2.grid(True)
         ax2.set_ylim(0, 1)
+        ax2.legend()
 
         # Update the canvas
         self.figure.tight_layout()
