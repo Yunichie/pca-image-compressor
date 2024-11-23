@@ -1,4 +1,12 @@
 # build_spec.py
+import sys
+import os
+import platform
+
+from PyInstaller.building.api import PYZ, EXE
+from PyInstaller.building.build_main import Analysis
+from PyInstaller.building.osx import BUNDLE
+
 block_cipher = None
 
 # Specify OS-specific excludes to reduce size
@@ -12,17 +20,23 @@ excludes = [
 hidden_imports = [
     'numpy',
     'PIL',
+    'PIL._imagingtk',
+    'PIL._tkinter_finder',
     'PyQt5',
     'matplotlib'
 ]
 
+# Project root directory (where main.py is located)
+project_root = os.path.dirname(os.path.dirname(__file__))
+
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [os.path.join(project_root, 'main.py')],
+    pathex=[project_root],
     binaries=[],
     datas=[],
     hiddenimports=hidden_imports,
     hookspath=[],
+    hooksconfig={},
     runtime_hooks=[],
     excludes=excludes,
     win_no_prefer_redirects=False,
@@ -39,7 +53,7 @@ def remove_from_list(source_list, patterns):
                 source_list.remove(file_name)
                 break
 
-# Remove unnecessary Qt plugins and files
+# Remove unnecessary Qt plugins and files to reduce size
 remove_from_list(a.binaries, [
     'Qt5DBus',
     'Qt5Network',
@@ -52,6 +66,7 @@ remove_from_list(a.binaries, [
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Define executable
 exe = EXE(
     pyz,
     a.scripts,
@@ -67,5 +82,21 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
-    icon='app_icon.ico'  # Add an icon if you have one
+    icon=None  # Add icon path if you have one
 )
+
+# Add macOS bundle for .app
+if platform.system() == 'Darwin':
+    app = BUNDLE(
+        exe,
+        name='ImageCompressor.app',
+        icon=None,  # Add .icns file path for macOS
+        bundle_identifier=None,
+        info_plist={
+            'NSHighResolutionCapable': 'True',
+            'LSBackgroundOnly': 'False',
+            'CFBundleName': 'ImageCompressor',
+            'CFBundleDisplayName': 'PCA Image Compressor',
+            'CFBundleShortVersionString': '1.0.0',
+        },
+    )

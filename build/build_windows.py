@@ -62,7 +62,7 @@ def build_windows():
         '--onefile',
         '--noconfirm',
         '--upx-dir=.',
-        'build_spec.py'
+        'build/build_spec.py'
     ]
 
     subprocess.run(cmd)

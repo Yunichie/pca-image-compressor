@@ -50,6 +50,16 @@ class ImageCompressorGUI(QMainWindow):
         components_layout.addWidget(self.components_spin)
         controls_layout.addLayout(components_layout)
 
+        # Add patch size control
+        patch_size_layout = QHBoxLayout()
+        patch_size_label = QLabel("Patch Size:")
+        self.patch_size_spin = QSpinBox()
+        self.patch_size_spin.setRange(1, 50)
+        self.patch_size_spin.setValue(8)
+        patch_size_layout.addWidget(patch_size_label)
+        patch_size_layout.addWidget(self.patch_size_spin)
+        controls_layout.addLayout(patch_size_layout)
+
         # Add compress button
         self.compress_btn = QPushButton("Compress")
         self.compress_btn.clicked.connect(self.compress_image)
@@ -162,21 +172,29 @@ class ImageCompressorGUI(QMainWindow):
             max_components = min(img.size)
             self.components_spin.setMaximum(max_components)
 
+            # Update patch size spinner maximum
+            max_patch_size = min(img.size)
+            self.patch_size_spin.setMaximum(max_patch_size)
+
     def compress_image(self):
         if not self.image_path:
             return
+
+        n_components = self.components_spin.value()
+        patch_size = self.patch_size_spin.value()
 
         # Disable controls during compression
         self.compress_btn.setEnabled(False)
         self.load_btn.setEnabled(False)
         self.components_spin.setEnabled(False)
+        self.patch_size_spin.setEnabled(False)
 
         # Reset progress bar
         self.progress_bar.setValue(0)
 
         # Start compression in worker thread
         self.compression_worker = CompressionWorker(
-            self.image_path, self.components_spin.value()
+            self.image_path, n_components, patch_size
         )
         self.compression_worker.finished.connect(self.compression_finished)
         self.compression_worker.progress.connect(self.progress_bar.setValue)
@@ -227,6 +245,7 @@ class ImageCompressorGUI(QMainWindow):
         self.compress_btn.setEnabled(True)
         self.load_btn.setEnabled(True)
         self.components_spin.setEnabled(True)
+        self.patch_size_spin.setEnabled(True)
         self.save_btn.setEnabled(True)
 
     def plot_analysis(self, eigenvalues, explained_variance_ratios):

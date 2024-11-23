@@ -24,7 +24,7 @@ def build_unix():
             '--codesign-identity', '-',
         ])
 
-    cmd.append('build_spec.py')
+    cmd.append('build/build_spec.py')
 
     # Run build
     subprocess.run(cmd)

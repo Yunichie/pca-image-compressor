@@ -1,1 +1,4 @@
 /.idea
+upx.exe
+/dist
+/build/build_spec

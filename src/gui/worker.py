@@ -12,10 +12,11 @@ class CompressionWorker(QThread):
     progress = pyqtSignal(int)
     error = pyqtSignal(str)
 
-    def __init__(self, image_path, n_components):
+    def __init__(self, image_path, n_components, patch_size):
         super().__init__()
         self.image_path = image_path
         self.n_components = n_components
+        self.patch_size = patch_size
         self.compressor = PCAImageCompressor()
 
     def run(self):
@@ -23,7 +24,7 @@ class CompressionWorker(QThread):
             # Compression
             self.progress.emit(25)
             compressed_data, compression_ratio = self.compressor.compress(
-                self.image_path, self.n_components
+                self.image_path, self.n_components, self.patch_size
             )
 
             # Get compression statistics
